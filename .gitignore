@@ -1,0 +1,6 @@
+.env
+*.jar
+*.tar.xz
+*.mmdb
+target/
+*.log

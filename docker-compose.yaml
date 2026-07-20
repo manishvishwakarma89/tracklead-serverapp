@@ -1,0 +1,124 @@
+services:
+
+  # ================================
+  # Application Service
+  # ================================
+  traklead-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: traklead-server
+    image: traklead-server:latest
+    restart: unless-stopped
+    ports:
+      - "9191:9191"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://traklead-db:5432/owexa_media?rewriteBatchedStatements=true
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
+      # condition: service_healthy
+    networks:
+      - traklead-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9191/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+        reservations:
+          memory: 256m
+
+  # ================================
+  # PostgreSQL Database
+  # ================================
+  traklead-db:
+    image: postgres:16-alpine
+    container_name: traklead-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USERNAME}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      
+    ports:
+      - "5432:5432"         # Remove in production
+    volumes:
+      - traklead-db-data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d  # Optional: SQL init scripts
+    networks:
+      - traklead-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d traklead"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  # ================================
+  # Redis Cache
+  # ================================
+  # traklead-redis:
+  #   image: redis:7-alpine
+  #   container_name: traklead-redis
+  #   restart: unless-stopped
+  #   command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 128mb --maxmemory-policy allkeys-lru
+  #   ports:
+  #     - "6379:6379"         # Remove in production
+  #   volumes:
+  #     - traklead-redis-data:/data
+  #   networks:
+  #     - traklead-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 128m
+
+  # ================================
+  # Nginx Reverse Proxy (optional)
+  # ================================
+  traklead-nginx:
+    image: nginx:alpine
+    container_name: traklead-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro        # Mount SSL certs
+    depends_on:
+      - traklead-server
+    networks:
+      - traklead-network
+
+# ================================
+# Volumes
+# ================================
+volumes:
+  traklead-db-data:
+    driver: local
+  # traklead-redis-data:
+  #   driver: local
+
+# ================================
+# Networks
+# ================================
+networks:
+  traklead-network:
+    driver: bridge

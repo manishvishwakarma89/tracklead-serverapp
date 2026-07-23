@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traklead-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "traklead.commonLabels" (dict "Release" .Release "component" "server") | nindent 4 }}
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector:
+    matchLabels:
+      {{- include "traklead.selectorLabels" (dict "Release" .Release "component" "server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "traklead.commonLabels" (dict "Release" .Release "component" "server") | nindent 8 }}
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z traklead-postgres 5432; do
+                echo "waiting for postgres..."; sleep 3;
+              done
+      containers:
+        - name: traklead-server
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.server.port }}
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://traklead-postgres:5432/{{ .Values.postgresql.database }}?rewriteBatchedStatements=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: traklead-postgres-secret
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: traklead-postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: TRAKLEAD_CACHE_TYPE
+              value: "redis"
+            - name: TRAKLEAD_REDIS_HOST
+              value: "traklead-redis"
+            - name: TRAKLEAD_REDIS_PORT
+              value: "6379"
+            - name: TRAKLEAD_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: traklead-redis-secret
+                  key: REDIS_PASSWORD
+            - name: TRAKLEAD_REDIS_SSL_ENABLED
+              value: "false"
+            - name: TRAKLEAD_TENANT_NAME
+              value: {{ .Values.server.env.tenantName | quote }}
+            - name: TRAKLEAD_SERVER_URL
+              value: {{ .Values.server.env.serverUrl | quote }}
+            - name: TRAKLEAD_CLICK_SERVER_URL
+              value: {{ .Values.server.env.clickServerUrl | quote }}
+            - name: TRAKLEAD_TENANT_PARTNER_URL
+              value: {{ .Values.server.env.tenantPartnerUrl | quote }}
+            - name: TRAKLEAD_TENANT_SUPPORT_EMAIL
+              value: {{ .Values.server.env.tenantSupportEmail | quote }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.server.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.server.port }}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traklead-server
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    {{- include "traklead.selectorLabels" (dict "Release" .Release "component" "server") | nindent 4 }}
+  ports:
+    - port: {{ .Values.server.port }}
+      targetPort: {{ .Values.server.port }}
+  type: NodePort
